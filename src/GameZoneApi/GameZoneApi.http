@@ -1,0 +1,117 @@
+@host = http://localhost:5158
+
+### Health check
+GET {{host}}/health
+
+### Register a new user
+# @name register
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "jane@example.com",
+  "fullName": "Jane Doe",
+  "password": "SuperSecret123!"
+}
+
+### Login (seeded dev admin)
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@gamezone.local",
+  "password": "Admin123!"
+}
+
+@token = {{login.response.body.accessToken}}
+
+### Current user
+GET {{host}}/api/users/me
+Authorization: Bearer {{token}}
+
+### List users (admin only)
+GET {{host}}/api/users?page=1&pageSize=25
+Authorization: Bearer {{token}}
+
+### Search users (admin only)
+GET {{host}}/api/users?search=jane
+Authorization: Bearer {{token}}
+
+### Get user by id
+GET {{host}}/api/users/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{token}}
+
+### Update a user's name
+PUT {{host}}/api/users/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "Jane R. Doe"
+}
+
+### Change own password
+POST {{host}}/api/users/me/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "currentPassword": "Admin123!",
+  "newPassword": "EvenBetterSecret456!"
+}
+
+### Delete a user (admin only)
+DELETE {{host}}/api/users/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{token}}
+
+### List machines (fixed seed data, read-only)
+GET {{host}}/api/machines
+Authorization: Bearer {{token}}
+
+### List machines including the out-of-service one
+GET {{host}}/api/machines?includeInactive=true
+Authorization: Bearer {{token}}
+
+### Book 3 hours on Rig-01 (8.00/h -> cost 24.00)
+# @name createRecord
+POST {{host}}/api/records
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "machineId": "11111111-1111-1111-1111-111111111111",
+  "startedAt": "2026-09-01T14:00:00Z",
+  "durationMinutes": 180,
+  "notes": "Valorant night"
+}
+
+@recordId = {{createRecord.response.body.id}}
+
+### List own records (admins see everyone's)
+GET {{host}}/api/records?page=1&pageSize=25
+Authorization: Bearer {{token}}
+
+### Filter records by machine and date window
+GET {{host}}/api/records?machineId=11111111-1111-1111-1111-111111111111&from=2026-09-01T00:00:00Z&to=2026-10-01T00:00:00Z
+Authorization: Bearer {{token}}
+
+### Get a record
+GET {{host}}/api/records/{{recordId}}
+Authorization: Bearer {{token}}
+
+### Update a record (moves it to Rig-03 for 90 min -> cost 6.75)
+PUT {{host}}/api/records/{{recordId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "machineId": "33333333-3333-3333-3333-333333333333",
+  "startedAt": "2026-09-01T14:00:00Z",
+  "durationMinutes": 90,
+  "notes": "moved rigs"
+}
+
+### Delete a record
+DELETE {{host}}/api/records/{{recordId}}
+Authorization: Bearer {{token}}
