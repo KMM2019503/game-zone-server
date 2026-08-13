@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
@@ -130,11 +131,46 @@ public class RecordsController : ControllerBase
     [ProducesResponseType(typeof(RecordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<RecordResponse>> Update(Guid id, UpdateRecordRequest request)
     {
         var record = await _db.Records.FirstOrDefaultAsync(r => r.Id == id);
         if (record is null) return NotFound();
         if (record.UserId != CurrentUserId && !IsAdmin) return Forbid();
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+
+        var startedAt = Normalize(request.StartedAt);
+        var hasPaymentHistory = await _db.Payments
+            .AnyAsync(p => p.RecordId == record.Id);
+
+        if (hasPaymentHistory)
+        {
+            var billingDetailsChanged =
+                request.MachineId != record.MachineId ||
+                startedAt != record.StartedAt ||
+                request.DurationMinutes != record.DurationMinutes;
+
+            if (billingDetailsChanged)
+            {
+                return Conflict(new
+                {
+                    message = "Billing details cannot be changed after payment activity has been recorded."
+                });
+            }
+
+            // Notes do not affect the charge. Do not recalculate Cost here because it
+            // is the rate snapshot that the existing payment history was based on.
+            record.Notes = request.Notes?.Trim();
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            await _db.Entry(record).Reference(r => r.User).LoadAsync();
+            await _db.Entry(record).Reference(r => r.Machine).LoadAsync();
+
+            return Ok(RecordResponse.From(record));
+        }
 
         var machine = await _db.Machines.FirstOrDefaultAsync(m => m.Id == request.MachineId);
         if (machine is null)
@@ -142,7 +178,6 @@ public class RecordsController : ControllerBase
         if (!machine.IsActive && machine.Id != record.MachineId)
             return BadRequest(new { message = $"Machine '{machine.Name}' is not available." });
 
-        var startedAt = Normalize(request.StartedAt);
         if (await OverlapsAsync(machine.Id, startedAt, request.DurationMinutes, excludeId: record.Id))
             return Conflict(new { message = $"Machine '{machine.Name}' is already booked for that time." });
 
@@ -153,6 +188,7 @@ public class RecordsController : ControllerBase
         record.Notes = request.Notes?.Trim();
 
         await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         await _db.Entry(record).Reference(r => r.User).LoadAsync();
         await _db.Entry(record).Reference(r => r.Machine).LoadAsync();
